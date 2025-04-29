@@ -1,7 +1,7 @@
 #!/bin/bash
 QUAYPATH=${QUAYPATH:-"."}
 QUAYCONF=${QUAYCONF:-"$QUAYPATH/conf"}
-# IGNORE_VALIDATION= -> Set this variable to continue Quay boot after a failed config validation. 
+# IGNORE_VALIDATION= -> Set this variable to continue Quay boot after a failed config validation.
 
 
 echo "Validating Configuration"

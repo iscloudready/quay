@@ -3,6 +3,10 @@ volumes:
   quay-db-data:
   clair-db-data:
 
+networks:
+  quay-network:
+    driver: bridge
+
 services:
   quay-db:
     user: postgres
@@ -16,7 +20,9 @@ services:
       - "./local-dev/init/pg_bootstrap.sql:/docker-entrypoint-initdb.d/pg_bootstrap.sql"
       - "quay-db-data:/var/lib/postgresql/data"
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
+    networks:
+      - quay-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U quay -d quay"]
       interval: 10s
@@ -35,7 +41,9 @@ services:
     volumes:
       - "clair-db-data:/var/lib/postgresql/data"
     ports:
-      - "5433:5432"
+      - "${CLAIR_DB_PORT}:5432"
+    networks:
+      - quay-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U clair -d clair"]
       interval: 10s
@@ -49,7 +57,9 @@ services:
     container_name: quay-redis
     image: docker.io/library/redis:latest
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT}:6379"
+    networks:
+      - quay-network
 
   local-dev-frontend:
     user: ${DOCKER_USER:-root}
@@ -64,10 +74,16 @@ services:
     working_dir: /quay-registry
     environment:
       npm_config_cache: /quay-registry/.npm
+    networks:
+      - quay-network
     entrypoint:
       - sh
       - -c
-      - npm run watch
+      #- npm run watch
+      #- "npm install --save-dev webpack webpack-cli && npm run watch || tail -f /dev/null"
+      - "npm install -g webpack@4.41.0 webpack-cli@3.3.9 && npm run watch"
+    tty: true
+    stdin_open: true
 
   quay:
     user: ${DOCKER_USER:-nobody:0}
@@ -80,8 +96,10 @@ services:
       - ".:/quay-registry"
       - "./local-dev/stack:/quay-registry/conf/stack"
     ports:
-      - "8080:8080"
-      - "8443:8443"
+      - "${QUAY_PORT}:8080"
+      - "${QUAY_SSL_PORT}:8443"
+    networks:
+      - quay-network
     environment:
       QUAY_VERSION: local-dev
       QUAY_HOTRELOAD: "true"
@@ -90,10 +108,9 @@ services:
       QUAYRUN: /tmp
       WORKER_COUNT_UNSUPPORTED_MINIMUM: "1"
       WORKER_COUNT: "1"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["tr -d '\\r' < /quay-registry/quay-entrypoint.sh > /tmp/fixed-entrypoint.sh && chmod +x /tmp/fixed-entrypoint.sh && dumb-init -- /tmp/fixed-entrypoint.sh registry"]
 
-  # clair is configured to share it's network
-  # namespace with quay. this allows quay to serve
-  # layers to clair over localhost.
   clair:
     user: ${DOCKER_USER:-nobody:0}
     container_name: quay-clair
@@ -103,7 +120,12 @@ services:
     environment:
       CLAIR_CONF: "/src/clair/config.yaml"
       CLAIR_MODE: "combo"
-    network_mode: "service:quay"
+    # network_mode: "service:quay"  # Commented out as it's causing issues
+    ports:
+      - "${CLAIR_PORT}:6060"
+      - "${CLAIR_API_PORT}:6061"
+    networks:
+      - quay-network
     cpus: 2
     command:
       ["bash", "-c", "cd /src/clair/cmd/clair; go run -mod vendor ."]

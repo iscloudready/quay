@@ -103,7 +103,8 @@ RUN set -ex\
 FROM registry.access.redhat.com/ubi8/nodejs-16 AS build-static
 WORKDIR /opt/app-root/src
 COPY --chown=1001:0 package.json package-lock.json  ./
-RUN npm clean-install
+#RUN npm clean-install
+RUN npm clean-install && npm install -g webpack@4.41.0 webpack-cli@3.3.9
 COPY --chown=1001:0 static/  ./static/
 COPY --chown=1001:0 *.json *.js  ./
 RUN npm run --quiet build
@@ -197,6 +198,13 @@ COPY --from=pushgateway /usr/local/bin/pushgateway /usr/local/bin/pushgateway
 COPY --from=build-python /app /app
 COPY --from=config-tool /opt/app-root/src/go/bin/config-tool /bin
 COPY --from=build-quaydir /quaydir $QUAYDIR
+
+# Fix line ending issues in entrypoint script
+RUN sed -i 's/\r$//' /quay-registry/quay-entrypoint.sh && \
+    chmod +x /quay-registry/quay-entrypoint.sh
+
+# Fix line endings in all shell scripts
+RUN find /quay-registry -name "*.sh" -type f -exec sed -i 's/\r$//' {} \; -exec chmod +x {} \;
 
 EXPOSE 8080 8443 7443 9091 55443
 # Don't expose /var/log as a volume, because we just configured it
