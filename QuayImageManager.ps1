@@ -1,4 +1,4 @@
-# QuayImageManager.ps1 - Comprehensive script for managing Quay container images
+# QuayImageManager.ps1 - Comprehensive script for managing Quay container images http://localhost:8080/api/v1/discovery
 # Usage examples:
 #   View repository info:     .\QuayImageManager.ps1 -Server "http://localhost:9090" -Token "your_token" -Namespace "your_namespace" -RepositoryName "your_repo"
 #   List all repos and tags:  .\QuayImageManager.ps1 -Server "http://localhost:9090" -Token "your_token" -Namespace "your_namespace" -ListAllRepos
@@ -185,6 +185,7 @@ function Get-QuayTags {
 }
 
 # Filter tags by age
+# Filter tags by age based on date in tag name
 function Get-OldTags {
     param (
         [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
@@ -204,17 +205,237 @@ function Get-OldTags {
                 continue
             }
 
-            # Check age
-            if ($tag.AgeInDays -gt $OlderThanDays) {
-                $oldTags += $tag
+            # Try to extract date from tag name (format: v1.0.X-YYYYMMDD)
+            $dateMatch = $tag.TagName -match ".*-(\d{8})$"
+            if ($dateMatch) {
+                $dateString = $Matches[1]
+                $year = $dateString.Substring(0, 4)
+                $month = $dateString.Substring(4, 2)
+                $day = $dateString.Substring(6, 2)
+
+                try {
+                    $tagDate = [DateTime]::new($year, [int]$month, [int]$day)
+                    $ageInDays = ([DateTime]::Now - $tagDate).TotalDays
+
+                    # Update the tag object with the extracted age
+                    $tag | Add-Member -NotePropertyName 'SimulatedAge' -NotePropertyValue ([math]::Round($ageInDays, 1)) -Force
+
+                    if ($ageInDays -gt $OlderThanDays) {
+                        $oldTags += $tag
+                    }
+                }
+                catch {
+                    Write-Verbose "Could not parse date for tag: $($tag.TagName)"
+                    # Use actual age if date parsing fails
+                    if ($tag.AgeInDays -gt $OlderThanDays) {
+                        $oldTags += $tag
+                    }
+                }
+            }
+            else {
+                # No date in tag name, use actual age
+                if ($tag.AgeInDays -gt $OlderThanDays) {
+                    $oldTags += $tag
+                }
             }
         }
         return $oldTags
     }
 }
 
-# Delete a specific tag
+# Function to generate a detailed tag cleanup report
+function Export-QuayCleanupReport {
+    param (
+        [string]$Server,
+        [string]$Token,
+        [string]$Namespace,
+        [string]$RepositoryName,
+        [int]$OlderThanDays = 90,
+        [string]$OutputPath = ".\TagCleanupReport.html"
+    )
+
+    # Get all tags
+    $allTags = Get-QuayTags -Server $Server -Token $Token -Namespace $Namespace -RepositoryName $RepositoryName
+
+    # Find tags older than specified limit
+    $oldTags = Get-OldTags -Tags $allTags -OlderThanDays $OlderThanDays
+
+    if ($oldTags.Count -eq 0) {
+        Write-Host "No tags found that are older than $OlderThanDays days" -ForegroundColor Green
+        return
+    }
+
+    # Group tags by their simulated age range
+    $tagGroups = @{}
+    foreach ($tag in $oldTags) {
+        # Extract date from tag name
+        $dateMatch = $tag.TagName -match ".*-(\d{8})$"
+        $ageCategory = "No Date Pattern"
+
+        if ($dateMatch) {
+            $dateString = $Matches[1]
+            $year = $dateString.Substring(0, 4)
+            $month = $dateString.Substring(4, 2)
+
+            $ageCategory = "$year-$month"
+        }
+
+        if (-not $tagGroups.ContainsKey($ageCategory)) {
+            $tagGroups[$ageCategory] = @()
+        }
+
+        $tagGroups[$ageCategory] += $tag
+    }
+
+    # Create HTML report
+    $html = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Quay Tag Cleanup Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .summary { margin: 20px 0; padding: 10px; background-color: #f0f0f0; border-radius: 5px; }
+        .instructions { margin: 20px 0; padding: 10px; background-color: #e6f7ff; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Quay Tag Cleanup Report</h1>
+
+    <div class="summary">
+        <h2>Summary</h2>
+        <p><strong>Repository:</strong> $Namespace/$RepositoryName</p>
+        <p><strong>Server:</strong> $Server</p>
+        <p><strong>Age Threshold:</strong> $OlderThanDays days</p>
+        <p><strong>Total Tags for Cleanup:</strong> $($oldTags.Count)</p>
+        <p><strong>Report Generated:</strong> $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")</p>
+    </div>
+
+    <div class="instructions">
+        <h2>Cleanup Instructions</h2>
+        <p>These tags have been identified as candidates for deletion based on their age pattern (embedded date in tag name).</p>
+        <p>To delete these tags:</p>
+        <ol>
+            <li>Log in to Quay at <a href="$Server">$Server</a></li>
+            <li>Navigate to repository <strong>$Namespace/$RepositoryName</strong></li>
+            <li>Go to the Tags tab</li>
+            <li>Use the search function to find each tag</li>
+            <li>Delete tags using the trash icon</li>
+        </ol>
+    </div>
+
+    <h2>Tags Identified for Deletion</h2>
+"@
+
+    # Add each tag group to the report
+    foreach ($group in $tagGroups.Keys | Sort-Object) {
+        $html += @"
+    <h3>$group</h3>
+    <table>
+        <tr>
+            <th>Tag Name</th>
+            <th>Size</th>
+            <th>Created Date</th>
+            <th>Simulated Age (days)</th>
+        </tr>
+"@
+
+        foreach ($tag in $tagGroups[$group] | Sort-Object -Property TagName) {
+            $html += @"
+        <tr>
+            <td>$($tag.TagName)</td>
+            <td>$($tag.Size)</td>
+            <td>$($tag.LastModified)</td>
+            <td>$($tag.SimulatedAge)</td>
+        </tr>
+"@
+        }
+
+        $html += @"
+    </table>
+"@
+    }
+
+    # Close HTML
+    $html += @"
+</body>
+</html>
+"@
+
+    # Save to file
+    $html | Out-File -FilePath $OutputPath -Encoding utf8
+
+    Write-Host "Report generated successfully at: $OutputPath" -ForegroundColor Green
+    Write-Host "Open this file in a web browser to view the detailed cleanup report" -ForegroundColor Cyan
+
+    # Return path for convenience
+    return $OutputPath
+}
+
+# Delete tags using OAuth 2 token with API restrictions disabled
 function Remove-QuayTag {
+    param (
+        [string]$Server,
+        [string]$Token,  # This should be an OAuth 2 token, not a robot token
+        [string]$Namespace,
+        [string]$RepositoryName,
+        [string]$TagName,
+        [switch]$WhatIf
+    )
+
+    if ($WhatIf) {
+        Write-Host "[WhatIf] Would delete tag $TagName from $Namespace/$RepositoryName" -ForegroundColor Yellow
+        return $true
+    }
+
+    # Use a simple Invoke-RestMethod with the OAuth 2 token
+    try {
+        $url = "$Server/api/v1/repository/$Namespace/$RepositoryName/tag/$TagName"
+
+        $headers = @{
+            "Authorization" = "Bearer $Token"
+            "Content-Type" = "application/json"
+            "X-Requested-With" = "XMLHttpRequest"
+        }
+
+        Write-Host "Deleting tag $TagName with OAuth token..." -ForegroundColor Gray
+
+        $response = Invoke-RestMethod -Uri $url -Headers $headers -Method DELETE -ErrorAction Stop
+
+        Write-Host "Successfully deleted tag $TagName" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "Failed to delete tag $TagName : $($_.Exception.Message)" -ForegroundColor Red
+
+        if ($_.Exception.Response) {
+            try {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $responseBody = $reader.ReadToEnd()
+                Write-Host "Error details: $responseBody" -ForegroundColor Red
+            }
+            catch {
+                # Ignore errors reading the response
+            }
+        }
+
+        Write-Host "`nIf you're still seeing CSRF errors, please ensure:" -ForegroundColor Yellow
+        Write-Host "1. You've set BROWSER_API_CALLS_XHR_ONLY: false in Quay's config.yaml" -ForegroundColor Yellow
+        Write-Host "2. You're using an OAuth 2 token, not a robot token" -ForegroundColor Yellow
+        Write-Host "3. You've restarted your Quay instance after changing the config" -ForegroundColor Yellow
+
+        return $false
+    }
+}
+
+# Corrected tag deletion function using proper PowerShell syntax for curl
+function __Remove-QuayTag {
     param (
         [string]$Server,
         [string]$Token,
@@ -229,10 +450,83 @@ function Remove-QuayTag {
         return $true
     }
 
+    # Use PowerShell's native Invoke-WebRequest with CSRF headers
+    try {
+        $url = "$Server/api/v1/repository/$Namespace/$RepositoryName/tag/$TagName"
+
+        $headers = @{
+            "Authorization" = "Bearer $Token"
+            "Content-Type" = "application/json"
+            "X-Requested-With" = "XMLHttpRequest"
+        }
+
+        Write-Host "Deleting tag $TagName..." -ForegroundColor Gray
+
+        # Use Invoke-WebRequest with proper headers
+        $response = Invoke-WebRequest -Uri $url -Headers $headers -Method DELETE -ErrorAction Stop
+
+        if ($response.StatusCode -eq 200 -or $response.StatusCode -eq 204) {
+            Write-Host "Successfully deleted tag $TagName" -ForegroundColor Green
+            return $true
+        }
+        else {
+            Write-Host "Failed to delete tag $TagName : Unexpected status code $($response.StatusCode)" -ForegroundColor Red
+            return $false
+        }
+    }
+    catch {
+        # Try alternative method if the first one fails
+        try {
+            Write-Host "First method failed, trying alternative approach..." -ForegroundColor Yellow
+
+            # Using cmd.exe /c curl to avoid PowerShell parsing issues
+            $curlCommand = "cmd.exe /c curl -X DELETE -H `"Authorization: Bearer $Token`" -H `"Content-Type: application/json`" -H `"X-Requested-With: XMLHttpRequest`" $url"
+
+            $result = Invoke-Expression -Command $curlCommand
+
+            if ($result -match "error") {
+                Write-Host "Failed to delete tag $TagName : $result" -ForegroundColor Red
+                return $false
+            }
+            else {
+                Write-Host "Successfully deleted tag $TagName" -ForegroundColor Green
+                return $true
+            }
+        }
+        catch {
+            Write-Host "Failed to delete tag $TagName : $($_.Exception.Message)" -ForegroundColor Red
+
+            Write-Host "`nTo delete this tag manually:" -ForegroundColor Yellow
+            Write-Host "1. Log in to the Quay UI at $Server" -ForegroundColor Yellow
+            Write-Host "2. Navigate to repository $Namespace/$RepositoryName" -ForegroundColor Yellow
+            Write-Host "3. Find and delete tag $TagName" -ForegroundColor Yellow
+
+            return $false
+        }
+    }
+}
+
+# Delete a specific tag with CSRF token handling
+function _Remove-QuayTag {
+    param (
+        [string]$Server,
+        [string]$Token,
+        [string]$Namespace,
+        [string]$RepositoryName,
+        [string]$TagName,
+        [switch]$WhatIf
+    )
+
+    if ($WhatIf) {
+        Write-Host "[WhatIf] Would delete tag $TagName from $Namespace/$RepositoryName" -ForegroundColor Yellow
+        return $true
+    }
+
+    # Add the X-Requested-With header to bypass CSRF protection
     $headers = @{
         "Authorization" = "Bearer $Token"
         "Content-Type" = "application/json"
-        "X-Requested-With" = "XMLHttpRequest"
+        "X-Requested-With" = "XMLHttpRequest"  # This helps bypass CSRF in many APIs
     }
 
     try {
@@ -243,11 +537,25 @@ function Remove-QuayTag {
     }
     catch {
         Write-Host "Failed to delete tag $TagName : $_" -ForegroundColor Red
+
+        # Try to get more detailed error information
+        if ($_.Exception.Response) {
+            try {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $responseBody = $reader.ReadToEnd()
+                Write-Host $responseBody -ForegroundColor Red
+            }
+            catch {
+                Write-Host "Unable to read error response details." -ForegroundColor Red
+            }
+        }
+
         return $false
     }
 }
 
 # Clean up old tags with age-based policy
+# Modify the Clear-OldTags function to use the report generator when deletion fails
 function Clear-OldTags {
     param (
         [string]$Server,
@@ -256,7 +564,8 @@ function Clear-OldTags {
         [string]$RepositoryName,
         [int]$OlderThanDays = 90,
         [string[]]$ExcludeTags = @("latest", "prod", "stable"),
-        [switch]$WhatIf
+        [switch]$WhatIf,
+        [switch]$GenerateReportOnFailure
     )
 
     Write-Host "Cleaning up tags older than $OlderThanDays days in $Namespace/$RepositoryName" -ForegroundColor Cyan
@@ -281,15 +590,51 @@ function Clear-OldTags {
 
     Write-Host "Found $($oldTags.Count) tags older than $OlderThanDays days" -ForegroundColor Yellow
 
+    # Track deletion failures
+    $deletionFailureCount = 0
+    $maximumFailures = 3  # After this many failures, switch to report mode
+
     # Sort tags by age (oldest first)
     $sortedTags = $oldTags | Sort-Object -Property LastModified
 
-    # Delete old tags
+    # Try to delete each tag
     foreach ($tag in $sortedTags) {
-        $formattedDate = $tag.LastModified.ToString("yyyy-MM-dd")
-        Write-Host "- $($tag.TagName) (Created: $formattedDate, Age: $($tag.AgeInDays) days)" -ForegroundColor Gray
+        Write-Host "- $($tag.TagName) (Created: $($tag.LastModified), Age: $($tag.AgeInDays) days)" -ForegroundColor Gray
 
-        Remove-QuayTag -Server $Server -Token $Token -Namespace $Namespace -RepositoryName $RepositoryName -TagName $tag.TagName -WhatIf:$WhatIf
+        # Skip deletion if WhatIf is specified
+        if ($WhatIf) {
+            Write-Host "  [WhatIf] Would delete tag $($tag.TagName)" -ForegroundColor Yellow
+            continue
+        }
+
+        # Try to delete the tag
+        $result = Remove-QuayTag -Server $Server -Token $Token -Namespace $Namespace -RepositoryName $RepositoryName -TagName $tag.TagName
+
+        # Track failure
+        if (-not $result) {
+            $deletionFailureCount++
+
+            # If we've had multiple failures, switch to report generation
+            if ($deletionFailureCount -ge $maximumFailures) {
+                Write-Host "`nMultiple tag deletion failures detected. Switching to report generation..." -ForegroundColor Yellow
+                break
+            }
+        }
+    }
+
+    # If we had deletion failures and GenerateReportOnFailure is true, generate a report
+    if ($deletionFailureCount -gt 0 -and ($GenerateReportOnFailure -or $deletionFailureCount -ge $maximumFailures)) {
+        Write-Host "`nGenerating cleanup report for manual deletion..." -ForegroundColor Cyan
+        $reportPath = Export-QuayCleanupReport -Server $Server -Token $Token -Namespace $Namespace -RepositoryName $RepositoryName -OlderThanDays $OlderThanDays
+        Write-Host "Report generated at: $reportPath" -ForegroundColor Green
+
+        # Try to open the report in the default browser
+        try {
+            Start-Process $reportPath
+        }
+        catch {
+            Write-Host "Couldn't open report automatically. Please open it manually." -ForegroundColor Yellow
+        }
     }
 
     Write-Host "Cleanup complete" -ForegroundColor Cyan
@@ -426,9 +771,24 @@ elseif ($RepositoryName) {
     # Clean up old tags if requested
     if ($CleanupOldTags) {
         Write-Host "`n"
-        Clear-OldTags -Server $Server -Token $Token -Namespace $Namespace -RepositoryName $RepositoryName -OlderThanDays $OlderThanDays -WhatIf:$WhatIf
+        Clear-OldTags -Server $Server -Token $Token -Namespace $Namespace -RepositoryName $RepositoryName -OlderThanDays $OlderThanDays -WhatIf:$WhatIf -GenerateReportOnFailure
+    }
+    # Generate report only (skip deletion attempts)
+    elseif ($GenerateReport) {
+        Write-Host "`n"
+        Write-Host "Generating cleanup report for tags older than $OlderThanDays days..." -ForegroundColor Cyan
+        $reportPath = Export-QuayCleanupReport -Server $Server -Token $Token -Namespace $Namespace -RepositoryName $RepositoryName -OlderThanDays $OlderThanDays
+
+        # Try to open the report
+        try {
+            Write-Host "Opening report in default browser..." -ForegroundColor Cyan
+            Start-Process $reportPath
+        }
+        catch {
+            Write-Host "Couldn't open report automatically. Please open it manually at: $reportPath" -ForegroundColor Yellow
+        }
     }
 }
 else {
-    Write-Host "Please specify either -RepositoryName or -ListAllRepos to perform an action." -ForegroundColor Yellow
+    Write-Host "Please specify either -RepositoryName, -ListAllRepos, or -GenerateReport to perform an action." -ForegroundColor Yellow
 }

@@ -1,0 +1,110 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>Quay Tag Cleanup Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .summary { margin: 20px 0; padding: 10px; background-color: #f0f0f0; border-radius: 5px; }
+        .instructions { margin: 20px 0; padding: 10px; background-color: #e6f7ff; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Quay Tag Cleanup Report</h1>
+
+    <div class="summary">
+        <h2>Summary</h2>
+        <p><strong>Repository:</strong> serviceaccount/test-repo</p>
+        <p><strong>Server:</strong> http://localhost:8080</p>
+        <p><strong>Age Threshold:</strong> 90 days</p>
+        <p><strong>Total Tags for Cleanup:</strong> 12</p>
+        <p><strong>Report Generated:</strong> 2025-04-30 17:14:47</p>
+    </div>
+
+    <div class="instructions">
+        <h2>Cleanup Instructions</h2>
+        <p>These tags have been identified as candidates for deletion based on their age pattern (embedded date in tag name).</p>
+        <p>To delete these tags:</p>
+        <ol>
+            <li>Log in to Quay at <a href="http://localhost:8080">http://localhost:8080</a></li>
+            <li>Navigate to repository <strong>serviceaccount/test-repo</strong></li>
+            <li>Go to the Tags tab</li>
+            <li>Use the search function to find each tag</li>
+            <li>Delete tags using the trash icon</li>
+        </ol>
+    </div>
+
+    <h2>Tags Identified for Deletion</h2>    <h3>2025-01</h3>
+    <table>
+        <tr>
+            <th>Tag Name</th>
+            <th>Size</th>
+            <th>Created Date</th>
+            <th>Simulated Age (days)</th>
+        </tr>        <tr>
+            <td>v1.0.5-20250106</td>
+            <td>N/A</td>
+            <td>04/30/2025 12:19:31</td>
+            <td>114.7</td>
+        </tr>        <tr>
+            <td>v1.0.5-20250106</td>
+            <td>2.05 MB</td>
+            <td>04/30/2025 12:19:30</td>
+            <td>114.7</td>
+        </tr>        <tr>
+            <td>v1.0.5-20250106</td>
+            <td>0 MB</td>
+            <td>04/30/2025 12:19:30</td>
+            <td>114.7</td>
+        </tr>        <tr>
+            <td>v1.0.6-20250116</td>
+            <td>N/A</td>
+            <td>04/30/2025 12:19:40</td>
+            <td>104.7</td>
+        </tr>        <tr>
+            <td>v1.0.6-20250116</td>
+            <td>0 MB</td>
+            <td>04/30/2025 12:19:39</td>
+            <td>104.7</td>
+        </tr>        <tr>
+            <td>v1.0.6-20250116</td>
+            <td>2.05 MB</td>
+            <td>04/30/2025 12:19:38</td>
+            <td>104.7</td>
+        </tr>        <tr>
+            <td>v1.0.7-20250120</td>
+            <td>N/A</td>
+            <td>04/30/2025 12:19:45</td>
+            <td>100.7</td>
+        </tr>        <tr>
+            <td>v1.0.7-20250120</td>
+            <td>2.05 MB</td>
+            <td>04/30/2025 12:19:45</td>
+            <td>100.7</td>
+        </tr>        <tr>
+            <td>v1.0.7-20250120</td>
+            <td>0 MB</td>
+            <td>04/30/2025 12:19:45</td>
+            <td>100.7</td>
+        </tr>        <tr>
+            <td>v1.0.8-20250126</td>
+            <td>N/A</td>
+            <td>04/30/2025 12:19:50</td>
+            <td>94.7</td>
+        </tr>        <tr>
+            <td>v1.0.8-20250126</td>
+            <td>0 MB</td>
+            <td>04/30/2025 12:19:49</td>
+            <td>94.7</td>
+        </tr>        <tr>
+            <td>v1.0.8-20250126</td>
+            <td>2.05 MB</td>
+            <td>04/30/2025 12:19:49</td>
+            <td>94.7</td>
+        </tr>    </table></body>
+</html>
