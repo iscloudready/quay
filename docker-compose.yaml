@@ -74,32 +74,35 @@ services:
     working_dir: /quay-registry
     environment:
       npm_config_cache: /quay-registry/.npm
-    networks:
-      - quay-network
+      NODE_OPTIONS: "--max-old-space-size=4096"
     entrypoint:
       - sh
       - -c
-      #- npm run watch
-      #- "npm install --save-dev webpack webpack-cli && npm run watch || tail -f /dev/null"
-      - "npm install -g webpack@4.41.0 webpack-cli@3.3.9 && npm run watch"
-    tty: true
-    stdin_open: true
+      - "npm install -g webpack@4.41.0 webpack-cli@3.3.9 && npm run build && tail -f /dev/null"
+    networks:
+      - quay-network
+    restart: unless-stopped
 
   quay:
-    user: ${DOCKER_USER:-nobody:0}
+    #user: ${DOCKER_USER:-nobody:0}
+    user: root  # Run as root for debugging
     container_name: quay-quay
     build:
       context: .
       target: final
     image: localhost/quay-local:latest
     volumes:
-      - ".:/quay-registry"
+      #- ".:/quay-registry"
       - "./local-dev/stack:/quay-registry/conf/stack"
     ports:
       - "${QUAY_PORT}:8080"
       - "${QUAY_SSL_PORT}:8443"
     networks:
-      - quay-network
+      quay-network:
+        aliases:
+          - quay-registry
+    extra_hosts:
+      - "localhost:127.0.0.1"
     environment:
       QUAY_VERSION: local-dev
       QUAY_HOTRELOAD: "true"
@@ -108,8 +111,27 @@ services:
       QUAYRUN: /tmp
       WORKER_COUNT_UNSUPPORTED_MINIMUM: "1"
       WORKER_COUNT: "1"
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["tr -d '\\r' < /quay-registry/quay-entrypoint.sh > /tmp/fixed-entrypoint.sh && chmod +x /tmp/fixed-entrypoint.sh && dumb-init -- /tmp/fixed-entrypoint.sh registry"]
+      SUPERVISORD_LOGFILE: "/tmp/supervisord.log"
+      REGISTRY_TITLE: "Quay Registry"
+      EXTERNAL_URL: "http://localhost:9090"
+      AUTH_EXTRA_ARGS: "--service-url=http://localhost:9090"
+      BUILDLOGS_REDIS: "redis://quay-redis:6379/0"
+      USERFILES_LOCATION: "local"
+      USERFILES_PATH: "/datastorage/userfiles"
+      FEATURE_DIRECT_LOGIN: "true"
+      FEATURE_REPO_MIRROR: "true"
+      BROWSER_API_CALLS_XHR_ONLY: "false"
+    entrypoint: ["dumb-init", "--", "/quay-registry/quay-entrypoint.sh"]
+    command: ["registry"]
+    #entrypoint: ["/bin/sh", "-c"]
+    #command: ["tr -d '\\r' < /quay-registry/quay-entrypoint.sh > /tmp/fixed-entrypoint.sh && chmod +x /tmp/fixed-entrypoint.sh && dumb-init -- /tmp/fixed-entrypoint.sh registry"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/instance"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   clair:
     user: ${DOCKER_USER:-nobody:0}
